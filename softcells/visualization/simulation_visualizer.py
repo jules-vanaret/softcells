@@ -199,6 +199,9 @@ class SimulationVisualizer:
                 for i in range(len(trail) - 1):
                     start_pos = trail[i]
                     end_pos = trail[i + 1]
+                    if abs(start_pos[0] - end_pos[0]) > DEFAULT_WIDTH / 2 or \
+                          abs(start_pos[1] - end_pos[1]) > DEFAULT_HEIGHT / 2:
+                            continue
                     pygame.draw.line(self.screen, self.trail_color, start_pos, end_pos, 1)
     
     def _render_shapes(self):
@@ -236,6 +239,11 @@ class SimulationVisualizer:
                 # Draw the spring
                 pos1 = (int(spring.point1.x), int(spring.point1.y))
                 pos2 = (int(spring.point2.x), int(spring.point2.y))
+
+                if abs(pos1[0] - pos2[0]) > DEFAULT_WIDTH / 2 or \
+                   abs(pos1[1] - pos2[1]) > DEFAULT_HEIGHT / 2:
+                    continue
+
                 pygame.draw.line(self.screen, color, pos1, pos2, shape.line_width)
         else:
             # Draw basic lines if springs are disabled
@@ -243,6 +251,11 @@ class SimulationVisualizer:
             for i in range(len(positions)):
                 start_pos = positions[i]
                 end_pos = positions[(i + 1) % len(positions)]
+
+                if abs(start_pos[0] - end_pos[0]) > DEFAULT_WIDTH / 2 or \
+                   abs(start_pos[1] - end_pos[1]) > DEFAULT_HEIGHT / 2:
+                    continue
+
                 pygame.draw.line(self.screen, shape.color, start_pos, end_pos, shape.line_width)
         
         # Draw the individual points

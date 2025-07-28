@@ -7,8 +7,9 @@ from ..core import PointMass
 from ..shapes import CircleShape
 from ..config import (
     DEFAULT_DT, DEFAULT_GRAVITY, DEFAULT_GLOBAL_DRAG_COEFFICIENT, 
-    DEFAULT_DRAG_TYPE, GLOBAL_PRESSURE_AMOUNT
+    DEFAULT_DRAG_TYPE, GLOBAL_PRESSURE_AMOUNT, PERIODIC
 )
+from ..utils import pbc_operator
 from .collision_handler import CollisionHandler
 
 
@@ -18,7 +19,7 @@ class PhysicsEngine:
     Handles all physics calculations, forces, and object interactions.
     """
     
-    def __init__(self, world_width=1000, world_height=800):
+    def __init__(self, world_width, world_height):
         """
         Initialize the physics engine.
         
@@ -55,18 +56,19 @@ class PhysicsEngine:
     
     def create_initial_scene(self):
         """Create initial physics objects for the simulation."""
+        pass
         # Create a circle shape with default settings
-        circle1 = CircleShape(
-            500, 100, 50, 
-            num_points=20, 
-            point_mass=1.0, 
-            pressure=GLOBAL_PRESSURE_AMOUNT,
-            spring_stiffness=1150.0, 
-            spring_damping=10.0, 
-            drag_coefficient=self.global_drag_coefficient, 
-            drag_type=self.drag_type
-        )
-        self.shapes.append(circle1)
+        # circle1 = CircleShape(
+        #     500, 100, 50, 
+        #     num_points=20, 
+        #     point_mass=1.0, 
+        #     pressure=GLOBAL_PRESSURE_AMOUNT,
+        #     spring_stiffness=1150.0, 
+        #     spring_damping=10.0, 
+        #     drag_coefficient=self.global_drag_coefficient, 
+        #     drag_type=self.drag_type
+        # )
+        # self.shapes.append(circle1)
     
     def add_point(self, x, y, mass=1.0):
         """
@@ -224,20 +226,25 @@ class PhysicsEngine:
     
     def _handle_boundary_collision(self, point):
         """Handle collision with world boundaries for a single point."""
-        if point.x < 0:
-            point.x = 0
-            point.vx = -point.vx * 0.8  # Some energy loss on bounce
-        elif point.x > self.world_width:
-            point.x = self.world_width
-            point.vx = -point.vx * 0.8
-        
-        if point.y < 0:
-            point.y = 0
-            point.vy = -point.vy * 0.8
-        elif point.y > self.world_height:
-            point.y = self.world_height
-            point.vy = -point.vy * 0.8
-    
+        if not PERIODIC:
+            if point.x < 0:
+                point.x = 0
+                point.vx = -point.vx * 0.8  # Some energy loss on bounce
+            elif point.x > self.world_width:
+                point.x = self.world_width
+                point.vx = -point.vx * 0.8
+            
+            if point.y < 0:
+                point.y = 0
+                point.vy = -point.vy * 0.8
+            elif point.y > self.world_height:
+                point.y = self.world_height
+                point.vy = -point.vy * 0.8
+        else:
+            # Periodic boundary conditions
+            point.x = point.x % self.world_width
+            point.y = point.y % self.world_height
+
     def step(self):
         """Advance the simulation by one time step."""
         self.update_physics()

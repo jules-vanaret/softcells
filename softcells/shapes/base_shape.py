@@ -6,10 +6,11 @@ This module contains no rendering dependencies.
 import math
 
 from ..core import Spring
-from ..utils.geometry import vectorized_orientations, on_segment
+from ..utils.geometry import vectorized_orientations, on_segment, pbc_operator
 from ..config import (
     DEFAULT_SHAPE_COLOR, DEFAULT_LINE_WIDTH, COLLISION_SLOP, 
-    COLLISION_CORRECTION_PERCENT, COLLISION_RESTITUTION
+    COLLISION_CORRECTION_PERCENT, COLLISION_RESTITUTION,
+    PERIODIC, DEFAULT_WIDTH, DEFAULT_HEIGHT,
 )
 
 
@@ -148,51 +149,48 @@ class Shape:
     
     def calculate_volume(self):
         """
-        Calculate the volume (area in 2D) of the shape using Gauss theorem.
-        Formula from paper: V = Σ 0.5 * |x1-x2| * |nx| * dl
-        
-        Returns:
-            float: Volume/area of the shape
+        Calculate the area of the closed 2D polygon using Gauss's theorem.
+        Also fills self.normal_vectors and self.edge_lengths.
         """
         if len(self.points) < 3:
             return 0.0
-        
-        volume = 0
+
+        volume = 0.0
         num_points = len(self.points)
-        
-        # Calculate normal vectors and edge lengths first
         self.normal_vectors = []
         self.edge_lengths = []
-        
+
         for i in range(num_points):
             p1 = self.points[i]
-            p2 = self.points[(i + 1) % num_points]  # Wrap around to close the shape
-            
-            # Calculate edge vector and length
-            dx = p1.x - p2.x
-            dy = p1.y - p2.y
-            edge_length = math.sqrt(dx * dx + dy * dy)
-            
-            # Avoid division by zero
-            if edge_length > 0.001:
-                # Calculate normal vector (perpendicular to edge, pointing outward)
-                # From paper: nx = (y1-y2)/r12d, ny = -(x1-x2)/r12d
+            p2 = self.points[(i + 1) % num_points]  # wrap around
+
+            dx = p2.x - p1.x
+            dy = p2.y - p1.y
+
+            if PERIODIC:
+                dx, wrapped_x = pbc_operator(dx, DEFAULT_WIDTH, return_wrap=True)
+                dy, wrapped_y = pbc_operator(dy, DEFAULT_HEIGHT, return_wrap=True)
+
+            edge_length = math.hypot(dx, dy)
+            self.edge_lengths.append(edge_length)
+
+            # Normal vector (perpendicular, outward orientation depends on CCW order)
+            if edge_length > 1e-9:
                 nx = dy / edge_length
                 ny = -dx / edge_length
             else:
-                nx = 0.0
-                ny = 0.0
-            
-            self.normal_vectors.append((nx, ny))
-            self.edge_lengths.append(edge_length)
-            
-            # Add to volume calculation using Gauss theorem
-            # V += 0.5 * |x1-x2| * |nx| * dl
-            mid_x = (p1.x + p2.x) / 2.0
+                nx = ny = 0.0
 
-            volume += mid_x * nx * edge_length
-        
-        return max(abs(volume), 1.0)  # Avoid zero volume
+            self.normal_vectors.append((nx, ny))
+
+            # Shoelace contribution: x1*y2 - x2*y1
+            dv = (p1.x * p2.y - p2.x * p1.y)
+            if PERIODIC:
+                volume += dv  * (-1)**(wrapped_x + wrapped_y)
+            else:
+                volume += dv
+
+        return abs(volume) * 0.5
     
     def apply_pressure_forces(self):
         """
@@ -236,56 +234,91 @@ class Shape:
                 p2.apply_force(fx * 0.5, fy * 0.5)
     
     def _get_bounding_box(self):
-        """Get the min and max coordinates of the shape."""
+        """
+        Return (xmin, xmax, ymin, ymax).
+
+        * non‑periodic → usual bbox
+        * periodic     → bbox of the *unwrapped* polygon, so the limits may
+                        be outside the primitive box.
+        """
         if not self.points:
-            return 0, 0, 0, 0
-        x_coords = [p.x for p in self.points]
-        y_coords = [p.y for p in self.points]
-        return min(x_coords), max(x_coords), min(y_coords), max(y_coords)
+            return 0.0, 0.0, 0.0, 0.0
+
+        if not PERIODIC:
+            xs = [p.x for p in self.points]
+            ys = [p.y for p in self.points]
+        else:
+            xs, ys = self._unwrap_polygon(self.points, DEFAULT_WIDTH, DEFAULT_HEIGHT)
+
+        return min(xs), max(xs), min(ys), max(ys)
+    
+    def _unwrap_polygon(self, points, box_w, box_h):
+        """Minimal‑image unwrap -> continuous vertex list (xs, ys)."""
+        xs = [points[0].x]
+        ys = [points[0].y]
+
+        for p in points[1:]:
+            dx = p.x - xs[-1]
+            dy = p.y - ys[-1]
+            if box_w:                 # apply only if box size > 0
+                dx -= round(dx / box_w) * box_w
+            if box_h:
+                dy -= round(dy / box_h) * box_h
+            xs.append(xs[-1] + dx)
+            ys.append(ys[-1] + dy)
+
+        return xs, ys
 
     def is_point_inside(self, test_point):
         """
-        Check if a point is inside this shape using the ray-casting algorithm.
-        
-        Args:
-            test_point (PointMass): The point to check.
-        
-        Returns:
-            bool: True if the point is inside, False otherwise.
+        Ray‑casting point‑in‑polygon test (even–odd rule) with optional
+        rectangular periodic boundaries.
+
+        Args
+        ----
+        test_point : PointMass
+
+        Returns
+        -------
+        bool
         """
         if len(self.points) < 3:
             return False
 
-        # Get a point guaranteed to be outside the shape's bounding box.
-        _, max_x, _, _ = self._get_bounding_box()
-        outside_point = (max_x + 10, test_point.y)
-        
-        intersections = 0
-        num_points = len(self.points)
+        # -- unwrap polygon so edges do not jump across the box ---------------
+        if PERIODIC:
+            xs, ys = self._unwrap_polygon(self.points, DEFAULT_WIDTH, DEFAULT_HEIGHT)
 
-        # The ray is from test_point to outside_point.
+            # shift polygon by integer box vectors so it's closest to test_point
+            shift_x = round((xs[0] - test_point.x) / DEFAULT_WIDTH) if DEFAULT_WIDTH else 0
+            shift_y = round((ys[0] - test_point.y) / DEFAULT_HEIGHT) if DEFAULT_HEIGHT else 0
+            xs = [x - shift_x * DEFAULT_WIDTH for x in xs]
+            ys = [y - shift_y * DEFAULT_HEIGHT for y in ys]
+
+            poly = list(zip(xs, ys))
+        else:
+            poly = [(p.x, p.y) for p in self.points]
+
+        # -- classic ray‑casting from test_point horizontally -----------------
         p1 = (test_point.x, test_point.y)
-        q1 = outside_point
+        max_x = max(v[0] for v in poly)
+        q1 = (max_x + (DEFAULT_WIDTH if PERIODIC else 10.0) + 1.0, test_point.y)   # point outside
 
-        # Iterate over each edge of the shape.
-        for i in range(num_points):
-            edge_start = self.points[i]
-            edge_end = self.points[(i + 1) % num_points]
-            
-            p2 = (edge_start.x, edge_start.y)
-            q2 = (edge_end.x, edge_end.y)
+        intersections = 0
+        n = len(poly)
 
-            # Check for intersection between the ray and the current edge.
-            # This is a standard line segment intersection algorithm.
+        for i in range(n):
+            p2 = poly[i]
+            q2 = poly[(i + 1) % n]
 
             o1, o2, o3, o4 = vectorized_orientations(p1, q1, p2, q2)
 
-            # General case of intersection
+            # general intersection
             if o1 != o2 and o3 != o4:
                 intersections += 1
                 continue
 
-            # Special Cases for collinear points
+            # collinear special cases
             if o3 == 0 and on_segment(p2, p1, q2):
                 intersections += 1
 
@@ -317,18 +350,33 @@ class Shape:
             line_vec_x = p2.x - p1.x
             line_vec_y = p2.y - p1.y
 
+
+            test_x = test_point.x - p1.x
+            test_y = test_point.y - p1.y
+
+            if PERIODIC:
+                line_vec_x = pbc_operator(line_vec_x, DEFAULT_WIDTH)
+                line_vec_y = pbc_operator(line_vec_y, DEFAULT_HEIGHT)
+                test_x = pbc_operator(test_x, DEFAULT_WIDTH)
+                test_y = pbc_operator(test_y, DEFAULT_HEIGHT)
+
+
             # Squared length of the edge
             line_len_sq = line_vec_x**2 + line_vec_y**2
             if line_len_sq < 0.00001:
                 continue
 
             # Projection of vector (test_point - p1) onto the edge vector
-            t = ((test_point.x - p1.x) * line_vec_x + (test_point.y - p1.y) * line_vec_y) / line_len_sq
+            t = (test_x * line_vec_x + test_y * line_vec_y) / line_len_sq
             t = max(0, min(1, t))  # Clamp t to the segment [0, 1]
 
             # Closest point on the line segment
             closest_x = p1.x + t * line_vec_x
             closest_y = p1.y + t * line_vec_y
+
+            if PERIODIC:
+                closest_x = pbc_operator(closest_x, DEFAULT_WIDTH)
+                closest_y = pbc_operator(closest_y, DEFAULT_HEIGHT)
 
             # Squared distance from the test point to the closest point on the segment
             dist_sq = (test_point.x - closest_x)**2 + (test_point.y - closest_y)**2

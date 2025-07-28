@@ -3,7 +3,8 @@ Point mass physics implementation using Verlet integration.
 """
 
 import math
-
+from ..utils import pbc_operator
+from ..config import PERIODIC, DEFAULT_WIDTH, DEFAULT_HEIGHT
 
 class PointMass:
     """
@@ -133,9 +134,9 @@ class PointMass:
             self.prev_y = temp_y
             
             # Derive velocity from position difference: v(t) = [x(t) - x(t-Δt)] / Δt
-            self.vx = (self.x - self.prev_x) / dt
-            self.vy = (self.y - self.prev_y) / dt
-        
+            self.vx = (self.x - self.prev_x) / dt if not PERIODIC else pbc_operator((self.x - self.prev_x), DEFAULT_WIDTH) / dt
+            self.vy = (self.y - self.prev_y) / dt if not PERIODIC else pbc_operator((self.y - self.prev_y), DEFAULT_HEIGHT) / dt
+
         # Clear forces for next frame
         self.force_x = 0.0
         self.force_y = 0.0

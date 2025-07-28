@@ -56,3 +56,19 @@ def vectorized_orientations(p1, q1, p2, q2):
     o3 = orientation(p2, q2, p1)
     o4 = orientation(p2, q2, q1)
     return o1, o2, o3, o4 
+
+def pbc_operator(x, L, return_wrap=False):
+    """
+    Apply periodic boundary condition operator.
+    
+    Args:
+        x: Value to apply PBC to
+        L: Length of the periodic boundary
+
+    Returns:
+        float: Adjusted value within the periodic boundary
+    """
+    x_new = (x + L/2) % L - L/2
+    if return_wrap:
+        return x_new, x_new == x
+    return x_new

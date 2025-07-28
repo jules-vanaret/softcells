@@ -20,7 +20,7 @@ Main Components:
 
 from .core import PointMass, Spring
 from .shapes import Shape, CircleShape
-from .simulation import PhysicsSimulation, PhysicsEngine, CollisionHandler
+from .simulation import PhysicsEngine, CollisionHandler
 from .visualization import SimulationVisualizer
 from .config import *
 
@@ -29,6 +29,6 @@ __author__ = "SoftCells Development Team"
 
 __all__ = [
     'PointMass', 'Spring', 'Shape', 'CircleShape', 
-    'PhysicsSimulation', 'PhysicsEngine', 'CollisionHandler',
+    'PhysicsEngine', 'CollisionHandler',
     'SimulationVisualizer'
 ] 

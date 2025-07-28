@@ -4,8 +4,8 @@ Collision detection and resolution for soft body physics.
 
 import math
 
-from ..config import COLLISION_SLOP, COLLISION_CORRECTION_PERCENT, COLLISION_RESTITUTION
-
+from ..config import COLLISION_SLOP, COLLISION_CORRECTION_PERCENT, COLLISION_RESTITUTION, PERIODIC, DEFAULT_WIDTH, DEFAULT_HEIGHT
+from ..utils import pbc_operator
 
 class CollisionHandler:
     """
@@ -54,78 +54,73 @@ class CollisionHandler:
 
     def resolve_collision(self, colliding_point, shape):
         """
-        Resolves a collision between a point and a shape.
-        Moves points to resolve overlap and updates velocities for bounce.
-        
-        Args:
-            colliding_point: The point mass that is colliding
-            shape: The shape that the point is colliding with
+        Resolve overlap and bounce between a point‑mass and a polygon edge,
+        now aware of rectangular PERIODIC boundaries (PERIODIC flag).
+
+        Args
+        ----
+        colliding_point : PointMass
+        shape           : Shape (provides find_closest_edge)
         """
         edge_p1, edge_p2, closest_point_data = shape.find_closest_edge(colliding_point)
-
-        if not edge_p1:
+        if edge_p1 is None:                      # no edge found
             return
 
-        closest_x, closest_y, t = closest_point_data
+        cx, cy, t = closest_point_data          # closest point on edge   (0 ≤ t ≤ 1)
 
-        # --- 1. POSITION RESOLUTION ---
-        # The penetration vector points from the edge to the colliding point (inward)
-        penetration_vec_x = colliding_point.x - closest_x
-        penetration_vec_y = colliding_point.y - closest_y
-        penetration_depth = math.sqrt(penetration_vec_x**2 + penetration_vec_y**2)
-        
-        if penetration_depth < 0.001:
+        # --- 1. POSITION RESOLUTION ----------------------------------------
+        dx = pbc_operator(colliding_point.x - cx, DEFAULT_WIDTH)
+        dy = pbc_operator(colliding_point.y - cy, DEFAULT_HEIGHT)
+        penetration = math.hypot(dx, dy)
+        if penetration < 1e-6:
+            return                                # already outside / on the edge
+
+        # inward normal (edge → point)
+        nx, ny = dx / penetration, dy / penetration
+
+        corr_depth = max(penetration - self.slop, 0.0)
+        if corr_depth == 0.0:
             return
 
-        # The normal points INWARD into the shape.
-        normal_x = penetration_vec_x / penetration_depth
-        normal_y = penetration_vec_y / penetration_depth
-        
-        correction_depth = max(penetration_depth - self.slop, 0.0)
-        if correction_depth == 0.0:
-            return
+        inv_m_p  = 1.0 / colliding_point.mass if colliding_point.mass > 0 else 0.0
+        inv_m_e1 = 1.0 / edge_p1.mass            if edge_p1.mass          > 0 else 0.0
+        inv_m_e2 = 1.0 / edge_p2.mass            if edge_p2.mass          > 0 else 0.0
+        total_inv_m = inv_m_p + inv_m_e1 * (1 - t) + inv_m_e2 * t
+        if total_inv_m < 1e-6:
+            return                                # infinite mass system – nothing to move
 
-        inv_mass_p = 1.0 / colliding_point.mass if colliding_point.mass > 0 else 0
-        inv_mass_e1 = 1.0 / edge_p1.mass if edge_p1.mass > 0 else 0
-        inv_mass_e2 = 1.0 / edge_p2.mass if edge_p2.mass > 0 else 0
-        
-        total_inv_mass = inv_mass_p + inv_mass_e1 * (1 - t) + inv_mass_e2 * t
-        if total_inv_mass < 0.001:
-            return
+        move = self.correction_percent * corr_depth / total_inv_m
 
-        move_dist = (correction_depth / total_inv_mass) * self.correction_percent
-        
-        # Move the colliding point OUTWARD (in the opposite direction of the inward normal)
-        colliding_point.x -= normal_x * move_dist * inv_mass_p
-        colliding_point.y -= normal_y * move_dist * inv_mass_p
-        
-        # Move the edge points of the shape OUTWARD to push back
-        edge_p1.x += normal_x * move_dist * inv_mass_e1 * (1 - t)
-        edge_p1.y += normal_y * move_dist * inv_mass_e1 * (1 - t)
-        edge_p2.x += normal_x * move_dist * inv_mass_e2 * t
-        edge_p2.y += normal_y * move_dist * inv_mass_e2 * t
+        def _shift(p, sx, sy):
+            """Move point and wrap back into the PERIODIC box if needed."""
+            p.x += sx
+            p.y += sy
+            if PERIODIC: p.x = pbc_operator(p.x, DEFAULT_WIDTH)
+            if PERIODIC : p.y = pbc_operator(p.y, DEFAULT_HEIGHT)
 
-        # --- 2. VELOCITY RESOLUTION ---
+        # point moves OUTward (‑normal); edge vertices move INward (+normal)
+        _shift(colliding_point, -nx * move * inv_m_p,               -ny * move * inv_m_p)
+        _shift(edge_p1,          nx * move * inv_m_e1 * (1 - t),     ny * move * inv_m_e1 * (1 - t))
+        _shift(edge_p2,          nx * move * inv_m_e2 * t,           ny * move * inv_m_e2 * t)
+
+        # --- 2. VELOCITY RESOLUTION ----------------------------------------
         edge_vx = edge_p1.vx * (1 - t) + edge_p2.vx * t
         edge_vy = edge_p1.vy * (1 - t) + edge_p2.vy * t
 
-        rel_vx = colliding_point.vx - edge_vx
-        rel_vy = colliding_point.vy - edge_vy
+        rel_vx  = colliding_point.vx - edge_vx
+        rel_vy  = colliding_point.vy - edge_vy
+        vel_n   = rel_vx * nx + rel_vy * ny        # component along normal
 
-        # Velocity along the inward normal. If positive, they are already separating.
-        vel_along_normal = rel_vx * normal_x + rel_vy * normal_y
-        if vel_along_normal > 0:
+        if vel_n > 0.0:                            # already separating
             return
 
-        # Impulse magnitude (will be positive since vel_along_normal is negative)
-        impulse_j = -(1 + self.restitution) * vel_along_normal / total_inv_mass
-        
-        # Apply impulse to push the colliding point OUTWARD (-n)
-        colliding_point.vx -= (impulse_j * inv_mass_p) * normal_x
-        colliding_point.vy -= (impulse_j * inv_mass_p) * normal_y
+        j = -(1 + self.restitution) * vel_n / total_inv_m   # impulse magnitude
 
-        # Apply impulse to push the edge points INWARD (+n)
-        edge_p1.vx += (impulse_j * inv_mass_e1 * (1 - t)) * normal_x
-        edge_p1.vy += (impulse_j * inv_mass_e1 * (1 - t)) * normal_y
-        edge_p2.vx += (impulse_j * inv_mass_e2 * t) * normal_x
-        edge_p2.vy += (impulse_j * inv_mass_e2 * t) * normal_y 
+        colliding_point.vx -= j * inv_m_p  * nx
+        colliding_point.vy -= j * inv_m_p  * ny
+
+        edge_p1.vx          += j * inv_m_e1 * (1 - t) * nx
+        edge_p1.vy          += j * inv_m_e1 * (1 - t) * ny
+
+        edge_p2.vx          += j * inv_m_e2 * t * nx
+        edge_p2.vy          += j * inv_m_e2 * t * ny

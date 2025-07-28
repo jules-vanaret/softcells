@@ -3,7 +3,9 @@ Spring physics implementation for connecting point masses.
 """
 
 import math
-
+from ..config import PERIODIC, DEFAULT_WIDTH, DEFAULT_HEIGHT
+from ..utils import pbc_operator
+from ..core.point_mass import PointMass
 
 class Spring:
     """
@@ -11,7 +13,7 @@ class Spring:
     Implements Hooke's law with velocity damping.
     """
     
-    def __init__(self, point1, point2, stiffness=50.0, damping=5.0, rest_length=None):
+    def __init__(self, point1, point2, stiffness=50.0, damping=5.0, rest_length=None, periodic=False):
         """
         Create a spring between two point masses.
         
@@ -21,6 +23,7 @@ class Spring:
             stiffness (float): Spring constant (ks)
             damping (float): Damping coefficient (kd)
             rest_length (float): Natural length of spring (calculated if None)
+            periodic (bool): Whether the simulation
         """
         self.point1 = point1
         self.point2 = point2
@@ -29,8 +32,12 @@ class Spring:
         
         # Calculate rest length if not provided
         if rest_length is None:
-            dx = point1.x - point2.x
-            dy = point1.y - point2.y
+            if PERIODIC:
+                dx = pbc_operator(point1.x - point2.x, DEFAULT_WIDTH)
+                dy = pbc_operator(point1.y - point2.y, DEFAULT_HEIGHT)
+            else:
+                dx = point1.x - point2.x
+                dy = point1.y - point2.y
             self.rest_length = math.sqrt(dx * dx + dy * dy)
         else:
             self.rest_length = rest_length
@@ -49,6 +56,9 @@ class Spring:
         # Calculate distance and direction
         dx = x1 - x2
         dy = y1 - y2
+        if PERIODIC:
+            dx = pbc_operator(dx, DEFAULT_WIDTH)
+            dy = pbc_operator(dy, DEFAULT_HEIGHT)
         current_length = math.sqrt(dx * dx + dy * dy)
         
         # Avoid division by zero
@@ -80,8 +90,12 @@ class Spring:
     
     def get_current_length(self):
         """Get the current length of the spring."""
-        dx = self.point1.x - self.point2.x
-        dy = self.point1.y - self.point2.y
+        if PERIODIC:
+            dx = pbc_operator(self.point1.x - self.point2.x, DEFAULT_WIDTH)
+            dy = pbc_operator(self.point1.y - self.point2.y, DEFAULT_HEIGHT)
+        else:
+            dx = self.point1.x - self.point2.x
+            dy = self.point1.y - self.point2.y
         return math.sqrt(dx * dx + dy * dy)
     
     def get_stretch_ratio(self):

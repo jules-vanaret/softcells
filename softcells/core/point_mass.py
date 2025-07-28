@@ -47,7 +47,10 @@ class PointMass:
         
         # Flag to handle first integration step
         self.first_step = True
-    
+
+        self.winding_number_x = 0  # Counter for periodic boundary crossings in x direction
+        self.winding_number_y = 0  # Counter for periodic boundary crossings in y direction
+
     def apply_force(self, fx, fy):
         """
         Apply a force to this point mass.

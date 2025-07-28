@@ -223,6 +223,14 @@ class PhysicsEngine:
 
         # Handle shape-to-shape collisions
         self.collision_handler.handle_collisions(self.shapes)
+
+        for point in self.points:
+            # Handle collisions for individual points
+            self._handle_boundary_collision(point)
+        for shape in self.shapes:
+            # Handle collisions for shapes
+            for point in shape.get_points():
+                self._handle_boundary_collision(point)
     
     def _handle_boundary_collision(self, point):
         """Handle collision with world boundaries for a single point."""
@@ -242,8 +250,12 @@ class PhysicsEngine:
                 point.vy = -point.vy * 0.8
         else:
             # Periodic boundary conditions
-            point.x = point.x % self.world_width
-            point.y = point.y % self.world_height
+            x, winding_x = point.x % self.world_width, int(point.x // self.world_width)
+            y, winding_y = point.y % self.world_height, int(point.y // self.world_height)
+            point.x = x
+            point.y = y
+            point.winding_number_x += winding_x
+            point.winding_number_y += winding_y
 
     def step(self):
         """Advance the simulation by one time step."""

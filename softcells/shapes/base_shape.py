@@ -6,7 +6,7 @@ This module contains no rendering dependencies.
 import math
 
 from ..core import Spring
-from ..utils.geometry import vectorized_orientations, on_segment, pbc_operator
+from ..utils.geometry import vectorized_orientations, on_segment, pbc_operator, winding_vector
 from ..config import (
     DEFAULT_SHAPE_COLOR, DEFAULT_LINE_WIDTH, COLLISION_SLOP, 
     COLLISION_CORRECTION_PERCENT, COLLISION_RESTITUTION,
@@ -164,12 +164,13 @@ class Shape:
             p1 = self.points[i]
             p2 = self.points[(i + 1) % num_points]  # wrap around
 
-            dx = p2.x - p1.x
-            dy = p2.y - p1.y
-
             if PERIODIC:
-                dx, wrapped_x = pbc_operator(dx, DEFAULT_WIDTH, return_wrap=True)
-                dy, wrapped_y = pbc_operator(dy, DEFAULT_HEIGHT, return_wrap=True)
+                vec = winding_vector(p2, p1, DEFAULT_WIDTH, DEFAULT_HEIGHT)
+                dx = vec[0]
+                dy = vec[1]
+            else:
+                dx = p1.x - p2.x
+                dy = p1.y - p2.y
 
             edge_length = math.hypot(dx, dy)
             self.edge_lengths.append(edge_length)
@@ -184,11 +185,18 @@ class Shape:
             self.normal_vectors.append((nx, ny))
 
             # Shoelace contribution: x1*y2 - x2*y1
-            dv = (p1.x * p2.y - p2.x * p1.y)
             if PERIODIC:
-                volume += dv  * (-1)**(wrapped_x + wrapped_y)
+                x1 = p1.x + DEFAULT_WIDTH * p1.winding_number_x
+                y1 = p1.y + DEFAULT_HEIGHT * p1.winding_number_y
+                x2 = p2.x + DEFAULT_WIDTH * p2.winding_number_x
+                y2 = p2.y + DEFAULT_HEIGHT  * p2.winding_number_y
+
+                dv = x1 * y2 - x2 * y1
+            
+                volume = dv
             else:
-                volume += dv
+                dv = (p1.x * p2.y - p2.x * p1.y)
+                volume = dv
 
         return abs(volume) * 0.5
     

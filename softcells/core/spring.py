@@ -4,7 +4,7 @@ Spring physics implementation for connecting point masses.
 
 import math
 from ..config import PERIODIC, DEFAULT_WIDTH, DEFAULT_HEIGHT
-from ..utils import pbc_operator
+from ..utils import pbc_operator, winding_vector
 from ..core.point_mass import PointMass
 
 class Spring:
@@ -33,8 +33,9 @@ class Spring:
         # Calculate rest length if not provided
         if rest_length is None:
             if PERIODIC:
-                dx = pbc_operator(point1.x - point2.x, DEFAULT_WIDTH)
-                dy = pbc_operator(point1.y - point2.y, DEFAULT_HEIGHT)
+                vec = winding_vector(point2, point1, DEFAULT_WIDTH, DEFAULT_HEIGHT)
+                dx = vec[0]
+                dy = vec[1]
             else:
                 dx = point1.x - point2.x
                 dy = point1.y - point2.y
@@ -54,11 +55,13 @@ class Spring:
         vx2, vy2 = self.point2.vx, self.point2.vy
         
         # Calculate distance and direction
-        dx = x1 - x2
-        dy = y1 - y2
         if PERIODIC:
-            dx = pbc_operator(dx, DEFAULT_WIDTH)
-            dy = pbc_operator(dy, DEFAULT_HEIGHT)
+            vec = winding_vector(self.point2, self.point1, DEFAULT_WIDTH, DEFAULT_HEIGHT)
+            dx = vec[0]
+            dy = vec[1]
+        else:
+            dx = x1 - x2
+            dy = y1 - y2
         current_length = math.sqrt(dx * dx + dy * dy)
         
         # Avoid division by zero
@@ -91,8 +94,9 @@ class Spring:
     def get_current_length(self):
         """Get the current length of the spring."""
         if PERIODIC:
-            dx = pbc_operator(self.point1.x - self.point2.x, DEFAULT_WIDTH)
-            dy = pbc_operator(self.point1.y - self.point2.y, DEFAULT_HEIGHT)
+            vec = winding_vector(self.point2, self.point1, DEFAULT_WIDTH, DEFAULT_HEIGHT)
+            dx = vec[0]
+            dy = vec[1]
         else:
             dx = self.point1.x - self.point2.x
             dy = self.point1.y - self.point2.y

@@ -4,6 +4,7 @@ Optimized with Numba for performance.
 """
 
 from numba import njit
+import numpy as np
 
 
 @njit(cache=True)
@@ -70,5 +71,20 @@ def pbc_operator(x, L, return_wrap=False):
     """
     x_new = (x + L/2) % L - L/2
     if return_wrap:
-        return x_new, x_new == x
+        return x_new, np.isclose(x_new, x)
     return x_new
+
+def winding_vector(p1, p2, Lx, Ly):
+    """
+    Calculate the vector going from p1 to p2 considering periodic boundaries.
+    Args:
+        p1, p2: Points as PointMass objects
+        Lx: Length of the periodic boundary in x direction
+        Ly: Length of the periodic boundary in y direction
+
+    Returns:
+        tuple: Adjusted x and y differences considering periodic boundaries
+    """
+    dx = p2.x - p1.x + Lx * (p2.winding_number_x - p1.winding_number_x)
+    dy = p2.y - p1.y + Ly * (p2.winding_number_y - p1.winding_number_y)
+    return dx, dy
